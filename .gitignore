@@ -1,108 +1,53 @@
-﻿# =========================
-# Python
-# =========================
-__pycache__/
+﻿# Python
+**/venv/
+**/__pycache__/
 *.py[cod]
 *$py.class
-
-# Virtual Environment
-venv/
-.venv/
+*.so
+.Python
 env/
-
-# Python build files
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+.installed.cfg
+*.egg
 
-# Jupyter
-.ipynb_checkpoints/
-
-# =========================
-# Environment Variables
-# =========================
+# Environment variables
 .env
-.env.*
-!.env.example
+**/.env
+.venv
+env.bak
+venv.bak
 
-# =========================
-# Model Files
-# =========================
+# Model weights
 backend/model_weights/
-*.h5
 *.pt
-*.pth
-*.ckpt
-*.onnx
-*.pickle
-*.pkl
+*.keras
+*.h5
 
-# =========================
-# Logs
-# =========================
-*.log
-logs/
+# Node.js
+**/node_modules/
+dist/
+dist-ssr
+*.local
 
-# =========================
-# VS Code
-# =========================
-.vscode/
-.history/
-
-# =========================
-# React / Vite
-# =========================
-frontend/node_modules/
-frontend/dist/
-frontend/build/
-
-# Vite cache
-.vite/
-
-# =========================
-# TypeScript
-# =========================
-*.tsbuildinfo
-
-# =========================
-# Docker
-# =========================
-.docker/
-docker-compose.override.yml
-
-# =========================
-# OS Files
-# =========================
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-Thumbs.db
-desktop.ini
-
-# =========================
-# Testing
-# =========================
-.pytest_cache/
-.coverage
-htmlcov/
-
-# =========================
-# IDEs
-# =========================
-.idea/
-*.swp
-*.swo
-
-# =========================
-# Temporary Files
-# =========================
-tmp/
-temp/
-*.tmp
-
-# =========================
-# Secrets
-# =========================
-*.pem
-*.key
-*.crt
-*.secret
-secrets.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
