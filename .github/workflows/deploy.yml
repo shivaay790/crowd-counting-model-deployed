@@ -1,0 +1,59 @@
+name: Deploy Backend to AWS EC2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy.yml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/crowd-counting-backend:latest
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # 1. Ensure model weights directory exists
+            mkdir -p ~/model_weights
+            
+            # 2. Sync weights from S3 to Host
+            # Note: EC2 must have an IAM role with S3 access or AWS CLI configured
+            aws s3 sync s3://${{ secrets.S3_BUCKET_NAME }}/weights ~/model_weights
+            
+            # 3. Pull latest image
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/crowd-counting-backend:latest
+            
+            # 4. Stop and remove existing container
+            docker stop crowd-backend || true
+            docker rm crowd-backend || true
+            
+            # 5. Run new container with volume mount
+            # Port 80 on host maps to 5000 in container
+            docker run -d \
+              --name crowd-backend \
+              -p 80:5000 \
+              -v ~/model_weights:/app/weights \
+              -e APP_ENV=production \
+              -e PRODUCTION_CORS_ORIGINS=${{ secrets.PRODUCTION_CORS_ORIGINS }} \
+              ${{ secrets.DOCKERHUB_USERNAME }}/crowd-counting-backend:latest

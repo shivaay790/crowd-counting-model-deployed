@@ -1,0 +1,10 @@
+venv/
+model_weights/
+__pycache__/
+*.pt
+*.keras
+.env
+Dockerfile
+.dockerignore
+.git/
+.github/
