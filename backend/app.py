@@ -10,17 +10,51 @@ import json
 import base64
 from dotenv import load_dotenv
 import onnxruntime as ort
+import boto3
 
 # Suppress unnecessary logs
 warnings.filterwarnings('ignore')
 
 load_dotenv()
 
+# S3 Configuration
+BUCKET_NAME = os.getenv("BUCKET_NAME", "crowd-counting-model-weights")
+AWS_REGION = os.getenv("AWS_REGION", "eu-north-1")
+MODEL_S3_KEY = os.getenv("MODEL_S3_KEY", "model.onnx")
+
+# Initialize S3 client with IAM role credentials
+s3_client = boto3.client('s3', region_name=AWS_REGION)
+
+def download_model_from_s3(dest_path):
+    """Download model from S3 bucket if not present locally"""
+    if not os.path.exists(dest_path):
+        print(f"[DOWNLOAD] Downloading model from s3://{BUCKET_NAME}/{MODEL_S3_KEY}...")
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        s3_client.download_file(BUCKET_NAME, MODEL_S3_KEY, dest_path)
+        print(f"[DOWNLOAD] Model saved to {dest_path}")
+    else:
+        print(f"[INFO] Model already exists at {dest_path}")
+
+def download_model_from_url(url, dest_path):
+    """Download model from URL if not present locally (fallback)"""
+    if not os.path.exists(dest_path):
+        print(f"[DOWNLOAD] Downloading model from {url}...")
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        with open(dest_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"[DOWNLOAD] Model saved to {dest_path}")
+    else:
+        print(f"[INFO] Model already exists at {dest_path}")
+
 app = Flask(__name__)
 
-# 1. CORS Configuration - allow port 4001
+# 1. CORS Configuration - use environment variable or default
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "https://crowd-counting.shivaaydhondiyal.online,http://localhost:4001,http://localhost:5173,http://localhost:5174").split(",")
 CORS(app, 
-     origins=["http://localhost:4001", "http://localhost:5173", "http://localhost:5174"],
+     origins=allowed_origins,
      supports_credentials=True,
      methods=["GET", "POST", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"]
@@ -37,7 +71,10 @@ if os.path.exists(docker_model_path):
 elif os.path.exists(local_model_path):
     MODEL_PATH = local_model_path
 else:
-    MODEL_PATH = local_model_path  # Fallback
+    MODEL_PATH = docker_model_path  # Default for Docker
+
+# Check for model URL or S3 config in environment variable
+MODEL_URL = os.getenv("MODEL_URL")
 
 # Session initialization
 session = None
@@ -46,6 +83,18 @@ output_name = None
 
 print(f"--- Initializing Local Model: {MODEL_PATH} ---")
 try:
+    # Download model from S3 first if not present
+    if not os.path.exists(MODEL_PATH):
+        print(f"[S3] Attempting to download model from S3 bucket: {BUCKET_NAME}")
+        try:
+            download_model_from_s3(MODEL_PATH)
+        except Exception as s3_error:
+            print(f"[S3] Failed to download from S3: {s3_error}")
+            # Fallback to URL if provided
+            if MODEL_URL:
+                print(f"[FALLBACK] Attempting to download from URL: {MODEL_URL}")
+                download_model_from_url(MODEL_URL, MODEL_PATH)
+    
     if os.path.exists(MODEL_PATH):
         session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
         input_name = session.get_inputs()[0].name

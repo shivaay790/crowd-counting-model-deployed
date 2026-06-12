@@ -11,14 +11,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create weights directory and copy our model into it
+# Create weights directory
 RUN mkdir -p /app/weights
-COPY model_weights/model.onnx /app/weights/model.onnx
 
 # Expose the Flask port
 EXPOSE 4000
 
-# Set environment variables
+# Set environment variables (MODEL_URL is optional - for S3 download)
+ENV PORT=4000
+ENV DEBUG=false
 ENV FLASK_APP=app.py
 ENV PYTHONUNBUFFERED=1
 

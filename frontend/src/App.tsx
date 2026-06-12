@@ -75,7 +75,9 @@ function App() {
       console.log('[SYS] Trying LOCAL MODEL...');
       const formData = new FormData();
       formData.append('image', blob);
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      // Use localhost in dev, secure endpoint in production
+      const isDev = import.meta.env.DEV;
+      const API_URL = import.meta.env.VITE_API_URL || (isDev ? 'http://localhost:4000' : 'https://my-model.crowd-counting.shivaaydhondiyal.online');
       const localResponse = await axios.post(`${API_URL}/count`, formData);
       localCount = localResponse.data.count;
       console.log('[SYS] LOCAL (YOUR CUSTOM CBAM MODEL) Result:', localCount);
