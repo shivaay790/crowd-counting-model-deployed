@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Video, Image as ImageIcon, Activity, AlertTriangle, BarChart3, Users, Zap, Info, Play, Pause, Target, Layers, ShieldAlert, Cpu, Database, ChevronDown, Terminal, Fingerprint, Eye, ScanSearch } from 'lucide-react';
+import { Upload, Image as ImageIcon, Terminal, Fingerprint, ScanSearch } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 
@@ -75,7 +75,8 @@ function App() {
       console.log('[SYS] Trying LOCAL MODEL...');
       const formData = new FormData();
       formData.append('image', blob);
-      const localResponse = await axios.post('http://localhost:4000/count', formData);
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+      const localResponse = await axios.post(`${API_URL}/count`, formData);
       localCount = localResponse.data.count;
       console.log('[SYS] LOCAL (YOUR CUSTOM CBAM MODEL) Result:', localCount);
     } catch (localError) {
@@ -142,14 +143,15 @@ function App() {
     if (!videoRef.current || !canvasRef.current) return;
 
     processingTimerRef.current = setInterval(async () => {
-      if (videoRef.current?.paused || videoRef.current?.ended) return;
+      const video = videoRef.current!;
+      if (video.paused || video.ended) return;
 
       const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0);
+        ctx.drawImage(video, 0, 0);
         canvas.toBlob(async (blob) => {
           if (blob) {
             const data = await analyzeFrame(blob);
@@ -317,21 +319,16 @@ function App() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
             {[
-              { icon: <ShieldAlert className="w-12 h-12" />, title: 'STAMPEDE_PROTO', desc: 'GRADIENT MAGNITUDE ANALYSIS FOR EARLY WARNINGS' },
-              { icon: <Target className="w-12 h-12" />, title: 'PCI_MAPPING', desc: 'GRID-BASED POPULATION CONCENTRATION INDEXING' },
-              { icon: <Cpu className="w-12 h-12" />, title: 'DBSCAN_CLUSTER', desc: 'UNSUPERVISED HOTSPOT DISCOVERY VIA NEURAL SPATIALS' }
+              { title: 'STAMPEDE_PROTO', desc: 'GRADIENT MAGNITUDE ANALYSIS FOR EARLY WARNINGS' },
+              { title: 'PCI_MAPPING', desc: 'GRID-BASED POPULATION CONCENTRATION INDEXING' },
+              { title: 'DBSCAN_CLUSTER', desc: 'UNSUPERVISED HOTSPOT DISCOVERY VIA NEURAL SPATIALS' }
             ].map((feature, i) => (
               <div key={i} className="border-2 border-white p-8 space-y-6 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-12 h-12 border-b-2 border-l-2 border-white flex items-center justify-center font-bold text-xs bg-white text-black">
                   0{i + 1}
                 </div>
-                <div className="text-cyan-400">{feature.icon}</div>
                 <h3 className="text-2xl font-black uppercase italic">{feature.title}</h3>
                 <p className="text-slate-500 text-sm font-bold leading-tight">{feature.desc}</p>
-                <div className="pt-4 flex items-center gap-2 text-[10px] font-black text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Eye className="w-3 h-3" />
-                  <span>VIEW_DETAILS_LOG</span>
-                </div>
               </div>
             ))}
           </div>
