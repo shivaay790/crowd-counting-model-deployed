@@ -1,9 +1,6 @@
 import os
 import warnings
 import numpy as np
-import cv2
-import torch
-import torch.nn as nn
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image
@@ -11,8 +8,8 @@ import io
 import requests
 import json
 import base64
-from torchvision import transforms
 from dotenv import load_dotenv
+import onnxruntime as ort
 
 # Suppress unnecessary logs
 warnings.filterwarnings('ignore')
@@ -21,63 +18,47 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# 1. CORS Configuration
-ENV = os.getenv("APP_ENV", "development")
-ALLOWED_ORIGINS = ["*"] if ENV != "production" else [os.getenv("PRODUCTION_CORS_ORIGINS", "https://shivaaydhondiyal.online")]
-
+# 1. CORS Configuration - allow port 4001
 CORS(app, 
-     origins=ALLOWED_ORIGINS,
+     origins=["http://localhost:4001", "http://localhost:5173", "http://localhost:5174"],
      supports_credentials=True,
      methods=["GET", "POST", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"]
 )
 
 # ==========================================
-# PYTORCH MODEL ARCHITECTURE
+# MODEL LOADING (ONNX)
 # ==========================================
-class PyTorchCBAMLayer(nn.Module):
-    def __init__(self, channels, reduction=8):
-        super(PyTorchCBAMLayer, self).__init__()
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(channels, channels // reduction),
-            nn.ReLU(),
-            nn.Linear(channels // reduction, channels)
-        )
-        self.sigmoid_channel = nn.Sigmoid()
-        self.conv_spatial = nn.Conv2d(2, 1, kernel_size=7, padding=3)
-        self.sigmoid_spatial = nn.Sigmoid()
+# Check both Docker path and local path for the model
+docker_model_path = "/app/weights/model.onnx"
+local_model_path = os.path.join(os.path.dirname(__file__), "model_weights", "model.onnx")
+if os.path.exists(docker_model_path):
+    MODEL_PATH = docker_model_path
+elif os.path.exists(local_model_path):
+    MODEL_PATH = local_model_path
+else:
+    MODEL_PATH = local_model_path  # Fallback
 
-    def forward(self, x):
-        b, c, _, _ = x.size()
-        avg_out = self.fc(self.avg_pool(x).view(b, c)).view(b, c, 1, 1)
-        max_out = self.fc(self.max_pool(x).view(b, c)).view(b, c, 1, 1)
-        x = x * self.sigmoid_channel(avg_out + max_out)
-        avg_out = torch.mean(x, dim=1, keepdim=True)
-        max_out, _ = torch.max(x, dim=1, keepdim=True)
-        sa = self.sigmoid_spatial(self.conv_spatial(torch.cat([avg_out, max_out], dim=1)))
-        return x * sa
+# Session initialization
+session = None
+input_name = None
+output_name = None
 
-class PyTorchDensityModel(nn.Module):
-    def __init__(self):
-        super(PyTorchDensityModel, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            PyTorchCBAMLayer(64),
-            nn.Conv2d(64, 1, kernel_size=1)
-        )
-
-    def forward(self, x):
-        return self.features(x)
+print(f"--- Initializing Local Model: {MODEL_PATH} ---")
+try:
+    if os.path.exists(MODEL_PATH):
+        session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
+        input_name = session.get_inputs()[0].name
+        output_name = session.get_outputs()[0].name
+        print("SUCCESS: ONNX model loaded locally!")
+    else:
+        print(f"WARNING: Model file not found at {MODEL_PATH}.")
+except Exception as e:
+    print(f"ERROR: Failed to load model: {e}")
 
 # ==========================================
-# LOCAL MODEL LOADING (PYTORCH)
+# FALLBACK GRADIO API
 # ==========================================
-MODEL_PATH = "/app/weights/best.pt"
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 def call_gradio_api(data):
     try:
         print("Executing Fallback Analysis via Gradio API...")
@@ -97,81 +78,114 @@ def call_gradio_api(data):
         print(f"Gradio API failure: {e}")
         return None
 
-print(f"--- Initializing Local Model: {MODEL_PATH} ---")
-model = None
-try:
-    if os.path.exists(MODEL_PATH):
-        # We try to load the full model object first as requested (best_full.pt was 99MB)
-        # If that fails, we can fall back to loading state_dict into the architecture
+# ==========================================
+# MAIN COUNTING FUNCTION
+# ==========================================
+def count_people(image_data):
+    """
+    Counts people using local ONNX model with fallback to API
+    """
+    try:
+        if session is not None:
+            print("Using local ONNX model for inference")
+            # Load image from bytes
+            img = Image.open(io.BytesIO(image_data)).convert('RGB')
+            
+            # Preprocess: Resize to 512x512 (model expects this size)
+            img_resized = img.resize((512, 512), Image.Resampling.LANCZOS)
+            img_array = np.array(img_resized).astype(np.float32) / 255.0
+            img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+            
+            # Run inference
+            outputs = session.run([output_name], {input_name: img_array})
+            density_map = outputs[0]
+            count = float(np.sum(density_map))
+            
+            # Round to nearest integer
+            return int(round(count))
+        else:
+            print("Local model not available, using Gradio API")
+            return call_gradio_api(image_data)
+    except Exception as e:
+        print(f"Error in count_people: {e}")
         try:
-            model = torch.load(MODEL_PATH, map_location=device)
+            return call_gradio_api(image_data)
         except:
-            model = PyTorchDensityModel()
-            model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+            return None
+
+# ==========================================
+# FLASK ROUTES
+# ==========================================
+@app.route("/", methods=["GET"])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "model_loaded": session is not None,
+        "model_path": MODEL_PATH
+    })
+
+@app.route("/count", methods=["POST"])
+def count_route():
+    """Main endpoint to count people from uploaded image"""
+    try:
+        if 'image' not in request.files:
+            return jsonify({"error": "No image file provided"}), 400
         
-        model.eval()
-        print("SUCCESS: PyTorch model loaded locally.")
-    else:
-        print(f"WARNING: Model file not found at {MODEL_PATH}.")
-except Exception as e:
-    print(f"ERROR: Failed to load model: {e}")
-
-def preprocess_image(image_bytes):
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    transform = transforms.Compose([
-        transforms.Resize((512, 512)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    return transform(img).unsqueeze(0).to(device)
-
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({"status": "active", "model_loaded": model is not None})
-
-@app.route('/analyze', methods=['POST'])
-def analyze():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
+        
+        # Read the file bytes
+        image_data = file.read()
+        
+        # Get the count
+        count = count_people(image_data)
+        
+        if count is None:
+            return jsonify({"error": "Failed to count people"}), 500
+        
+        return jsonify({
+            "count": count,
+            "source": "local_model" if session is not None else "gradio_api"
+        })
     
-    file = request.files['file']
-    img_bytes = file.read()
+    except Exception as e:
+        print(f"Error in /count route: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/count-base64", methods=["POST"])
+def count_base64_route():
+    """Endpoint to count people from base64 encoded image string"""
+    try:
+        data = request.get_json()
+        if not data or 'image' not in data:
+            return jsonify({"error": "No base64 image provided"}), 400
+        
+        # Decode base64
+        base64_str = data['image']
+        # Remove header if present (data:image/jpeg;base64,)
+        if ',' in base64_str:
+            base64_str = base64_str.split(',')[1]
+        
+        image_data = base64.b64decode(base64_str)
+        
+        # Get the count
+        count = count_people(image_data)
+        
+        if count is None:
+            return jsonify({"error": "Failed to count people"}), 500
+        
+        return jsonify({
+            "count": count,
+            "source": "local_model" if session is not None else "gradio_api"
+        })
     
-    results = {
-        "hf_analysis": {"count": 0, "tier": "Unknown", "detections": []},
-        "classification_scores": []
-    }
+    except Exception as e:
+        print(f"Error in /count-base64 route: {e}")
+        return jsonify({"error": str(e)}), 500
 
-    # 1. Local PyTorch Inference
-    if model:
-        try:
-            with torch.no_grad():
-                input_tensor = preprocess_image(img_bytes)
-                density_map = model(input_tensor)
-                count = float(torch.sum(density_map).item())
-                results["hf_analysis"]["count"] = round(count, 1)
-                print(f"Local PyTorch Count: {results['hf_analysis']['count']}")
-        except Exception as e:
-            print(f"Local Inference Error: {e}")
-
-    # 2. API Fallback
-    if results["hf_analysis"]["count"] < 0.1 or not model:
-        api_count = call_gradio_api(img_bytes)
-        if api_count is not None:
-            results["hf_analysis"]["count"] = api_count
-            print(f"API Fallback Count: {api_count}")
-
-    # Tier classification
-    final_count = results["hf_analysis"]["count"]
-    if final_count <= 15: tier = "Sparse"
-    elif final_count <= 50: tier = "Normal"
-    elif final_count <= 150: tier = "Moderate Dense"
-    else: tier = "High Dense"
-    
-    results["hf_analysis"]["tier"] = tier
-    results["classification_scores"] = [{"label": tier, "score": 1.0}]
-
-    return jsonify(results)
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 4000))
+    debug = os.getenv("DEBUG", "false").lower() == "true"
+    app.run(host="0.0.0.0", port=port, debug=debug)

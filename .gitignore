@@ -1,4 +1,4 @@
-﻿# Python
+﻿﻿# Python
 **/venv/
 **/__pycache__/
 *.py[cod]
@@ -33,7 +33,7 @@ venv.bak
 backend/model_weights/
 *.pt
 *.keras
-*.h5
+*.onnx
 
 # Node.js
 **/node_modules/

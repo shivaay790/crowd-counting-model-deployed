@@ -8,6 +8,6 @@ start cmd /k "cd backend && venv\Scripts\activate && python app.py"
 start cmd /k "cd frontend && npm run dev"
 
 echo Backend and Frontend are starting in separate windows.
-echo Backend: http://localhost:5000
-echo Frontend: http://localhost:5173
+echo Backend: http://localhost:4000
+echo Frontend: http://localhost:4001
 pause

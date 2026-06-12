@@ -1,9 +1,7 @@
 flask
 flask-cors
-torch
-torchvision
-opencv-python-headless
-numpy
+onnxruntime
+numpy<2.0
 pillow
 python-dotenv
 requests
